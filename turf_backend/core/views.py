@@ -690,6 +690,23 @@ def verify_payment(request):
 
     booking_id = request.data.get("booking_id")
     payment_id = request.data.get("payment_id")
+    order_id = request.data.get("order_id")
+    signature = request.data.get("signature")
+
+    if not all([booking_id, payment_id, order_id, signature]):
+        return Response({"error": "Missing payment details"}, status=400)
+
+    try:
+        client = razorpay.Client(
+            auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+        )
+        client.utility.verify_payment_signature({
+            'razorpay_order_id': order_id,
+            'razorpay_payment_id': payment_id,
+            'razorpay_signature': signature
+        })
+    except Exception as e:
+        return Response({"error": "Payment verification failed: Invalid signature"}, status=400)
 
     with transaction.atomic():
         booking = (
@@ -701,6 +718,7 @@ def verify_payment(request):
         payment = Payment.objects.get(booking=booking)
 
         payment.razorpay_payment_id = payment_id
+        payment.razorpay_signature = signature
         payment.amount = int(booking.total_payable * 100)
         payment.status = "SUCCESS"
         payment.save()
