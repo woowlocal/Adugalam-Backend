@@ -1,3 +1,6 @@
+import json
+import hmac
+import hashlib
 import random
 import secrets
 from datetime import timedelta, datetime
@@ -744,6 +747,61 @@ def verify_payment(request):
     #     )
 
     return Response({"success": True})
+
+@csrf_exempt
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def razorpay_webhook(request):
+    try:
+        signature = request.headers.get("x-razorpay-signature", "")
+        body = request.body.decode("utf-8")
+
+        # Verify Signature
+        secret = getattr(settings, "RAZORPAY_WEBHOOK_SECRET", "")
+        expected_signature = hmac.new(
+            bytes(secret, "utf-8"),
+            bytes(body, "utf-8"),
+            hashlib.sha256
+        ).hexdigest()
+
+        if expected_signature != signature:
+            return Response({"error": "Invalid signature"}, status=400)
+
+        # Parse Event Payload
+        payload = json.loads(body)
+        event = payload.get("event")
+
+        if event == "payment.captured":
+            payment_entity = payload.get("payload", {}).get("payment", {}).get("entity", {})
+            order_id = payment_entity.get("order_id")
+            payment_id = payment_entity.get("id")
+
+            if order_id:
+                with transaction.atomic():
+                    try:
+                        payment = Payment.objects.select_for_update().get(razorpay_order_id=order_id)
+                        
+                        if payment.status != "SUCCESS":
+                            booking = payment.booking
+                            payment.razorpay_payment_id = payment_id
+                            payment.status = "SUCCESS"
+                            payment.amount = payment_entity.get("amount", payment.amount)
+                            payment.save()
+
+                            # Update Booking Status
+                            booking.status = "CONFIRMED"
+                            booking.vendor_status = "ACTIVE"
+                            booking.save()
+
+                            # Trigger emails asynchronously
+                            threading.Thread(target=send_booking_emails, args=(booking,)).start()
+                    except Payment.DoesNotExist:
+                        pass
+
+        return Response({"status": "ok"}, status=200)
+    except Exception as e:
+        print("Webhook Error:", str(e))
+        return Response({"error": "Internal Server Error"}, status=500)
 
 @api_view(["GET"])
 def nearby_turfs(request):

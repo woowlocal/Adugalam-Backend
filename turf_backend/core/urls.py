@@ -50,6 +50,7 @@ from core.views import (
     list_contact_messages,
     create_payment_order,
     verify_payment,
+    razorpay_webhook,
     turf_games,
     admin_login,
     users_list,
@@ -140,6 +141,7 @@ urlpatterns = [
     # -------- PAYMENTS --------
     path("payment/create-order/", create_payment_order),
     path("payment/verify/", verify_payment),
+    path("payment/webhook/", razorpay_webhook),
 
     # -------- ADMIN --------
     path("admin/login/", admin_login),

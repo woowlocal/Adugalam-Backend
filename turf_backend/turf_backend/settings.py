@@ -205,16 +205,18 @@ DEFAULT_FROM_EMAIL = f"TurfApp <{EMAIL_HOST_USER}>"
 
 
 # --------------------------------------------------
+# --------------------------------------------------
 # RAZORPAY CONFIG
 
-RAZORPAY_KEY_ID = "rzp_live_S2qvjT5ZF9ktdQ"
-RAZORPAY_KEY_SECRET = "dewrEebNJvz5tHCtozV01syN"
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
+RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
+RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET")
 
 # VITE_API_BASE_URL=http://127.0.0.1:8000
 
 
-WHATSAPP_API_URL = "https://103.229.250.150/unified/v2/send"
-WHATSAPP_CLIENT_ID = "woowlocal5dhn6wxesv14a2m"
-WHATSAPP_CLIENT_PASSWORD = "dnud6xluv1uopqss6amv1fxaenv0f56p"
-WHATSAPP_FROM_NUMBER = "916380433385"
-WHATSAPP_USER_ID = 3
+WHATSAPP_API_URL = os.getenv("WHATSAPP_API_URL")
+WHATSAPP_CLIENT_ID = os.getenv("WHATSAPP_CLIENT_ID")
+WHATSAPP_CLIENT_PASSWORD = os.getenv("WHATSAPP_CLIENT_PASSWORD")
+WHATSAPP_FROM_NUMBER = os.getenv("WHATSAPP_FROM_NUMBER")
+WHATSAPP_USER_ID = int(os.getenv("WHATSAPP_USER_ID", 3))
