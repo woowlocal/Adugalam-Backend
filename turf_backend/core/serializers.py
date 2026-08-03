@@ -294,11 +294,19 @@ class FavoriteTurfSerializer(serializers.ModelSerializer):
 
 
 # ------------------Event Serializer------------------
-from .models import Event
+from .models import Event, EventGallery
+
+class EventGallerySerializer(serializers.ModelSerializer):
+    image = serializers.ImageField(use_url=True)
+
+    class Meta:
+        model = EventGallery
+        fields = ["id", "image"]
 
 class EventSerializer(serializers.ModelSerializer):
     image = serializers.ImageField(use_url=True, required=False, allow_null=True)
     price = serializers.SerializerMethodField()
+    gallery = EventGallerySerializer(many=True, read_only=True)
 
     class Meta:
         model = Event
@@ -306,7 +314,7 @@ class EventSerializer(serializers.ModelSerializer):
             "id", "title", "category", "location", "address",
             "organized_by", "start_date", "end_date", "start_time",
             "end_time", "amount", "is_free", "image", "agenda",
-            "vips", "status", "is_active", "bg_color", "total_seats", "booked_seats", "created_at", "price"
+            "vips", "status", "is_active", "bg_color", "total_seats", "booked_seats", "created_at", "price", "gallery"
         ]
 
     def get_price(self, obj):

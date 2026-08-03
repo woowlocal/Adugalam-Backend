@@ -645,6 +645,56 @@ class Event(models.Model):
     def __str__(self):
         return self.title
 
+class EventBookingRecord(models.Model):
+    TICKET_TYPE_CHOICES = (
+        ("normal", "Normal"),
+        ("vip", "VIP"),
+    )
+    STATUS_CHOICES = (
+        ("confirmed", "Confirmed"),
+        ("pending", "Pending"),
+    )
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="bookings")
+    booking_ref = models.CharField(max_length=20, unique=True, blank=True)
+
+    # Attendee Info
+    attendee_name = models.CharField(max_length=100)
+    attendee_email = models.EmailField()
+    attendee_whatsapp = models.CharField(max_length=15)
+
+    # Ticket Info
+    ticket_type = models.CharField(max_length=10, choices=TICKET_TYPE_CHOICES, default="normal")
+    qty = models.IntegerField(default=1)
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    total_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="confirmed")
+    is_free = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def save(self, *args, **kwargs):
+        if not self.booking_ref:
+            import random, string
+            self.booking_ref = "EVT-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.booking_ref} — {self.attendee_name} ({self.event.title})"
+
+
+class EventGallery(models.Model):
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="gallery")
+    image = models.ImageField(upload_to="events/gallery/")
+
+    def __str__(self):
+        return f"{self.event.title} - Gallery Image"
+
+
 
 class EventReview(models.Model):
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="reviews")

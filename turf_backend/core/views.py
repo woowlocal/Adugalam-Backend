@@ -1419,6 +1419,8 @@ def bookings_list(request):
                 "id": b.id,
                 "player_name": b.user_name or (b.user.name if b.user else "-") or "-",
                 "status": b.status,
+                "vendor_status": b.vendor_status,
+                "booking_type": "MANUAL" if b.vendor_status == "APPROVED" and b.user_name else "ONLINE",
                 "created_at": b.created_at,
                 "user": {
                     "id": b.user.id if b.user else None,
@@ -1437,7 +1439,7 @@ def bookings_list(request):
                 },
                 "date": b.date,
                 "amount": b.total_payable,
-                # ✅ ADD SLOT DATA
+                # ADD SLOT DATA
                 "slots": slot_list,
             }
         )
@@ -1916,7 +1918,103 @@ def vendor_update_booking_status(request):
     return Response({"success": True})
 
 
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def vendor_manual_booking(request):
+    """
+    Vendor manually books slots for a customer without payment.
+    """
+    if request.user.role != "VENDOR":
+        return Response({"error": "Unauthorized"}, status=403)
+
+    turf_id = request.data.get("turf_id")
+    slot_ids = request.data.get("slot_ids", [])
+    date_str = request.data.get("date")
+    user_name = request.data.get("user_name", "Walk-in Customer")
+    user_mobile = request.data.get("user_mobile", "")
+
+    if not all([turf_id, slot_ids, date_str]):
+        return Response({"error": "turf_id, slot_ids, and date are required"}, status=400)
+
+    try:
+        turf = Turf.objects.get(id=turf_id)
+    except Turf.DoesNotExist:
+        return Response({"error": "Turf not found"}, status=404)
+
+    # Ownership check - vendor must own turf OR be linked via Vendor record
+    is_owner = turf.owner_id == request.user.id
+    if not is_owner:
+        try:
+            vendor = Vendor.objects.get(email=request.user.email)
+            is_owner = turf.vendor_id == vendor.id
+        except Vendor.DoesNotExist:
+            pass
+    if not is_owner:
+        return Response({"error": "Forbidden. Not your turf."}, status=403)
+
+    try:
+        booking_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError:
+        return Response({"error": "Invalid date format. Use YYYY-MM-DD."}, status=400)
+
+    # Validate slots exist and belong to turf
+    slots = list(Slot.objects.filter(id__in=slot_ids, turf_id=turf_id))
+    if len(slots) != len(slot_ids):
+        return Response({"error": "Some slots are invalid or do not belong to this turf"}, status=400)
+
+    # Check if any slot already booked on that date
+    already_booked = Booking.objects.filter(
+        turf=turf,
+        date=booking_date,
+        slots__in=slots,
+        status="CONFIRMED"
+    ).exists()
+    if already_booked:
+        return Response({"error": "One or more selected slots are already booked"}, status=400)
+
+    # Calculate amounts safely
+    total_amount = 0
+    for s in slots:
+        try:
+            slot_price = float(s.price) if s.price else 0
+            total_amount += slot_price if slot_price > 0 else float(turf.price_per_hour)
+        except (TypeError, ValueError):
+            total_amount += float(turf.price_per_hour)
+
+    # Get first game of turf (required FK in model)
+    game = Game.objects.filter(turf=turf).first()
+    if not game:
+        return Response({"error": "No game found for this turf. Please add a game first."}, status=400)
+
+    # Create manual booking using actual model fields
+    try:
+        booking = Booking.objects.create(
+            user=request.user,
+            turf=turf,
+            game=game,
+            date=booking_date,
+            original_amount=total_amount,
+            advance_amount=0,
+            service_charge=0,
+            total_payable=total_amount,
+            total_price=total_amount,
+            status="CONFIRMED",
+            vendor_status="APPROVED",
+            user_name=user_name,
+            user_mobile=user_mobile,
+        )
+        booking.slots.set(slots)
+    except Exception as e:
+        return Response({"error": f"Booking creation failed: {str(e)}"}, status=500)
+
+    return Response({
+        "success": True,
+        "message": "Manual booking confirmed",
+        "booking_id": booking.id
+    })
+
 # --------- Schedule Time (Slots)
+
 
 
 @api_view(["GET"])
@@ -2216,14 +2314,16 @@ def vendor_status_toggle(request, vendor_id):
         # Also update all related turfs based on vendor status
         if new_status == "Approved":
             Turf.objects.filter(vendor=vendor).update(is_approved=True)
-            send_whatsapp_message(
+            res = send_whatsapp_message(
                 phone=vendor.phone, vendor_id=vendor.vendor_id, location=vendor.location, status="Approved"
             )
+            print(" WhatsApp Approved Result:", res)
         elif new_status in ["Inactive", "Rejected"]:
             Turf.objects.filter(vendor=vendor).update(is_approved=False)
-            send_whatsapp_message(
+            res = send_whatsapp_message(
                 phone=vendor.phone, vendor_id=vendor.vendor_id, location=vendor.location, status="Rejected"
             )
+            print(" WhatsApp Rejected Result:", res)
 
         return Response({"message": "Status updated", "status": vendor.status})
     except Vendor.DoesNotExist:
@@ -4138,6 +4238,12 @@ def admin_events(request):
         except Exception:
             return None
 
+    def parse_int(val, default=0):
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            return default
+
     start_hour = data.get("startTime_hour") or data.get("start_hour", "")
     start_min = data.get("startTime_minute") or data.get("start_minute", "00")
     start_ampm = data.get("startTime_ampm") or data.get("start_ampm", "AM")
@@ -4155,11 +4261,11 @@ def admin_events(request):
         "end_date": data.get("endDate") or data.get("end_date") or None,
         "start_time": parse_time(start_hour, start_min, start_ampm),
         "end_time": parse_time(end_hour, end_min, end_ampm),
-        "amount": data.get("amount", 0) or 0,
+        "amount": data.get("amount") or 0,
         "is_free": str(data.get("amount", "0")) == "0",
         "agenda": data.get("agenda", ""),
         "vips": data.get("vips", ""),
-        "total_seats": int(data.get("total_seats", 0) or 0),
+        "total_seats": parse_int(data.get("total_seats"), 0),
         "status": data.get("status", "upcoming"),
         "is_active": True,
     }
@@ -4179,6 +4285,12 @@ def admin_events(request):
         if "banner" in request.FILES:
             event.image = request.FILES["banner"]
             event.save()
+            
+        if "gallery" in request.FILES:
+            from .models import EventGallery
+            for f in request.FILES.getlist("gallery"):
+                EventGallery.objects.create(event=event, image=f)
+                
         return Response(EventSerializer(event, context={"request": request}).data, status=201)
 
     return Response(serializer.errors, status=400)
@@ -4200,6 +4312,12 @@ def admin_event_detail(request, pk):
 
     if request.method == "PUT":
         data = request.data
+        def parse_int(val, default=0):
+            try:
+                return int(val)
+            except (ValueError, TypeError):
+                return default
+
         event.title = data.get("eventName") or data.get("title", event.title)
         event.category = data.get("eventCategory") or data.get("category", event.category)
         event.location = data.get("location", event.location)
@@ -4207,11 +4325,11 @@ def admin_event_detail(request, pk):
         event.organized_by = data.get("organizedBy") or data.get("organized_by", event.organized_by)
         event.start_date = data.get("startDate") or data.get("start_date", event.start_date) or None
         event.end_date = data.get("endDate") or data.get("end_date", event.end_date) or None
-        event.amount = data.get("amount", event.amount)
+        event.amount = data.get("amount") or event.amount
         event.is_free = str(data.get("amount", event.amount)) == "0"
         event.agenda = data.get("agenda", event.agenda)
         event.vips = data.get("vips", event.vips)
-        event.total_seats = int(data.get("total_seats", event.total_seats) or 0)
+        event.total_seats = parse_int(data.get("total_seats"), event.total_seats)
         event.status = data.get("status", event.status)
         event.is_active = data.get("is_active", event.is_active)
 
@@ -4219,6 +4337,12 @@ def admin_event_detail(request, pk):
             event.image = request.FILES["banner"]
 
         event.save()
+        
+        if "gallery" in request.FILES:
+            from .models import EventGallery
+            for f in request.FILES.getlist("gallery"):
+                EventGallery.objects.create(event=event, image=f)
+                
         return Response(EventSerializer(event, context={"request": request}).data)
 
     if request.method == "DELETE":
@@ -4229,25 +4353,125 @@ def admin_event_detail(request, pk):
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def book_event(request, pk):
-    """Book an event seat - increments booked_seats"""
+    """Book an event seat (free) - save booking record & send email receipt"""
     try:
         event = Event.objects.get(pk=pk)
     except Event.DoesNotExist:
         return Response({"error": "Event not found"}, status=404)
 
-    if event.total_seats > 0 and event.booked_seats >= event.total_seats:
+    try:
+        qty = int(request.data.get("qty", 1))
+    except (ValueError, TypeError):
+        qty = 1
+
+    if event.total_seats > 0 and event.booked_seats + qty > event.total_seats:
         return Response({"error": "Slot Full! All seats are booked."}, status=400)
 
-    event.booked_seats += 1
+    event.booked_seats += qty
     event.save()
+
+    # Attendee details
+    attendee_name    = request.data.get("name", "Guest")
+    attendee_email   = request.data.get("email", "")
+    attendee_whatsapp = request.data.get("whatsapp", "")
+    ticket_type      = request.data.get("ticket_type", "normal")
+
+    # Save booking record
+    from .models import EventBookingRecord
+    booking = EventBookingRecord.objects.create(
+        event=event,
+        attendee_name=attendee_name,
+        attendee_email=attendee_email,
+        attendee_whatsapp=attendee_whatsapp,
+        ticket_type=ticket_type,
+        qty=qty,
+        unit_price=0,
+        total_amount=0,
+        is_free=True,
+        status="confirmed",
+    )
+
+    # Send HTML email receipt
+    if attendee_email:
+        try:
+            from django.core.mail import send_mail
+            from django.utils.html import format_html
+            import datetime
+            event_date = event.start_date.strftime("%d %b %Y") if event.start_date else "TBA"
+            subject = f"🎉 Booking Confirmed — {event.title} [{booking.booking_ref}]"
+            html_body = f"""
+<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#f0f4f8;font-family:'Segoe UI',Arial,sans-serif;">
+  <div style="max-width:560px;margin:30px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
+    <div style="background:linear-gradient(135deg,#059669,#10b981);padding:32px 28px;text-align:center;">
+      <div style="font-size:40px;margin-bottom:8px;">🎟️</div>
+      <h1 style="color:#fff;margin:0;font-size:22px;font-weight:700;">Booking Confirmed!</h1>
+      <p style="color:#d1fae5;margin:6px 0 0;font-size:14px;">Your ticket for <strong>{event.title}</strong> is secured</p>
+    </div>
+    <div style="padding:28px;">
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:16px 20px;margin-bottom:20px;text-align:center;">
+        <p style="margin:0;color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:1px;">Booking Reference</p>
+        <p style="margin:6px 0 0;font-size:26px;font-weight:800;color:#059669;letter-spacing:3px;">{booking.booking_ref}</p>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;">
+        <tr style="border-bottom:1px solid #f3f4f6;">
+          <td style="padding:10px 4px;color:#6b7280;">Event</td>
+          <td style="padding:10px 4px;font-weight:600;color:#111;">{event.title}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f3f4f6;">
+          <td style="padding:10px 4px;color:#6b7280;">Date</td>
+          <td style="padding:10px 4px;color:#111;">{event_date}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f3f4f6;">
+          <td style="padding:10px 4px;color:#6b7280;">Venue</td>
+          <td style="padding:10px 4px;color:#111;">{event.location or event.address or 'TBA'}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f3f4f6;">
+          <td style="padding:10px 4px;color:#6b7280;">Attendee</td>
+          <td style="padding:10px 4px;color:#111;">{attendee_name}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f3f4f6;">
+          <td style="padding:10px 4px;color:#6b7280;">Email</td>
+          <td style="padding:10px 4px;color:#111;">{attendee_email}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f3f4f6;">
+          <td style="padding:10px 4px;color:#6b7280;">Ticket Type</td>
+          <td style="padding:10px 4px;color:#111;">{ticket_type.upper()}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f3f4f6;">
+          <td style="padding:10px 4px;color:#6b7280;">Quantity</td>
+          <td style="padding:10px 4px;color:#111;">{qty}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 4px;color:#6b7280;">Amount</td>
+          <td style="padding:10px 4px;font-weight:700;color:#059669;font-size:16px;">FREE</td>
+        </tr>
+      </table>
+      <div style="margin-top:24px;padding:14px;background:#fffbeb;border-radius:8px;border:1px solid #fde68a;font-size:13px;color:#92400e;">
+        📌 Please carry this email as your entry pass. Show the booking reference at the venue.
+      </div>
+    </div>
+    <div style="background:#f9fafb;padding:16px 28px;text-align:center;border-top:1px solid #f3f4f6;">
+      <p style="margin:0;font-size:12px;color:#9ca3af;">Adugalam Events · <a href="mailto:myadugalam@gmail.com" style="color:#059669;">myadugalam@gmail.com</a></p>
+    </div>
+  </div>
+</body>
+</html>"""
+            send_mail(subject, f"Booking Confirmed! Ref: {booking.booking_ref}", settings.EMAIL_HOST_USER, [attendee_email], html_message=html_body, fail_silently=True)
+        except Exception:
+            pass
 
     seats_left = max(event.total_seats - event.booked_seats, 0)
     return Response({
         "message": "Successfully Booked!",
+        "booking_ref": booking.booking_ref,
+        "booking_id": booking.id,
         "booked_seats": event.booked_seats,
         "total_seats": event.total_seats,
         "seats_left": seats_left,
     })
+
 
 
 # ==================== EVENT REVIEWS ====================
@@ -4347,3 +4571,239 @@ def booking_receipt(request, booking_id):
              for s in booking.slots.all()
         ]
     })
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def event_create_payment_order(request, pk):
+    try:
+        event = Event.objects.get(pk=pk)
+    except Event.DoesNotExist:
+        return Response({"error": "Event not found"}, status=404)
+    
+    try:
+        qty = int(request.data.get("qty", 1))
+    except ValueError:
+        qty = 1
+        
+    ticket_type = request.data.get("ticket_type", "normal")
+    
+    base_price = float(event.amount)
+    if ticket_type == "vip":
+        base_price = float(event.amount) * 1.5
+    
+    amount = int(base_price * qty * 100)
+    
+    if amount == 0:
+        return Response({"error": "Free events don't require payment."}, status=400)
+        
+    client = razorpay.Client(
+        auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+    )
+    
+    razorpay_order = client.order.create(
+        {
+            "amount": amount,
+            "currency": "INR",
+            "payment_capture": "1",
+        }
+    )
+    
+    return Response({
+        "order_id": razorpay_order["id"],
+        "amount": amount,
+        "razorpay_key": settings.RAZORPAY_KEY_ID
+    })
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def event_verify_payment(request, pk):
+    try:
+        event = Event.objects.get(pk=pk)
+    except Event.DoesNotExist:
+        return Response({"error": "Event not found"}, status=404)
+
+    try:
+        qty = int(request.data.get("qty", 1))
+    except (ValueError, TypeError):
+        qty = 1
+
+    if event.total_seats > 0 and (event.booked_seats + qty) > event.total_seats:
+        return Response({"error": "Slot Full! Not enough seats available."}, status=400)
+
+    event.booked_seats += qty
+    event.save()
+
+    # Attendee details
+    attendee_name     = request.data.get("name", "Guest")
+    attendee_email    = request.data.get("email", "")
+    attendee_whatsapp = request.data.get("whatsapp", "")
+    ticket_type       = request.data.get("ticket_type", "normal")
+
+    # Compute unit price
+    base_price = float(event.amount)
+    if ticket_type == "vip":
+        base_price = float(event.amount) * 1.5
+    total_amount = base_price * qty
+
+    # Save booking record
+    from .models import EventBookingRecord
+    booking = EventBookingRecord.objects.create(
+        event=event,
+        attendee_name=attendee_name,
+        attendee_email=attendee_email,
+        attendee_whatsapp=attendee_whatsapp,
+        ticket_type=ticket_type,
+        qty=qty,
+        unit_price=base_price,
+        total_amount=total_amount,
+        is_free=False,
+        status="confirmed",
+    )
+
+    # Send HTML email receipt for paid booking
+    if attendee_email:
+        try:
+            from django.core.mail import send_mail
+            event_date = event.start_date.strftime("%d %b %Y") if event.start_date else "TBA"
+            amount_display = f"₹{total_amount:,.2f}"
+            subject = f"🎉 Booking Confirmed — {event.title} [{booking.booking_ref}]"
+            html_body = f"""
+<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#f0f4f8;font-family:'Segoe UI',Arial,sans-serif;">
+  <div style="max-width:560px;margin:30px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);">
+    <div style="background:linear-gradient(135deg,#7c3aed,#a78bfa);padding:32px 28px;text-align:center;">
+      <div style="font-size:40px;margin-bottom:8px;">🎟️</div>
+      <h1 style="color:#fff;margin:0;font-size:22px;font-weight:700;">Payment Successful!</h1>
+      <p style="color:#ede9fe;margin:6px 0 0;font-size:14px;">Your ticket for <strong>{event.title}</strong> is secured</p>
+    </div>
+    <div style="padding:28px;">
+      <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;padding:16px 20px;margin-bottom:20px;text-align:center;">
+        <p style="margin:0;color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:1px;">Booking Reference</p>
+        <p style="margin:6px 0 0;font-size:26px;font-weight:800;color:#7c3aed;letter-spacing:3px;">{booking.booking_ref}</p>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;">
+        <tr style="border-bottom:1px solid #f3f4f6;">
+          <td style="padding:10px 4px;color:#6b7280;">Event</td>
+          <td style="padding:10px 4px;font-weight:600;color:#111;">{event.title}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f3f4f6;">
+          <td style="padding:10px 4px;color:#6b7280;">Date</td>
+          <td style="padding:10px 4px;color:#111;">{event_date}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f3f4f6;">
+          <td style="padding:10px 4px;color:#6b7280;">Venue</td>
+          <td style="padding:10px 4px;color:#111;">{event.location or event.address or 'TBA'}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f3f4f6;">
+          <td style="padding:10px 4px;color:#6b7280;">Attendee</td>
+          <td style="padding:10px 4px;color:#111;">{attendee_name}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f3f4f6;">
+          <td style="padding:10px 4px;color:#6b7280;">Email</td>
+          <td style="padding:10px 4px;color:#111;">{attendee_email}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f3f4f6;">
+          <td style="padding:10px 4px;color:#6b7280;">Ticket Type</td>
+          <td style="padding:10px 4px;color:#111;">{ticket_type.upper()}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f3f4f6;">
+          <td style="padding:10px 4px;color:#6b7280;">Quantity</td>
+          <td style="padding:10px 4px;color:#111;">{qty}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f3f4f6;">
+          <td style="padding:10px 4px;color:#6b7280;">Unit Price</td>
+          <td style="padding:10px 4px;color:#111;">₹{base_price:,.2f}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 4px;color:#6b7280;">Total Paid</td>
+          <td style="padding:10px 4px;font-weight:700;color:#7c3aed;font-size:16px;">{amount_display}</td>
+        </tr>
+      </table>
+      <div style="margin-top:24px;padding:14px;background:#fffbeb;border-radius:8px;border:1px solid #fde68a;font-size:13px;color:#92400e;">
+        📌 Please carry this email as your entry pass. Show the booking reference at the venue.
+      </div>
+    </div>
+    <div style="background:#f9fafb;padding:16px 28px;text-align:center;border-top:1px solid #f3f4f6;">
+      <p style="margin:0;font-size:12px;color:#9ca3af;">Adugalam Events · <a href="mailto:myadugalam@gmail.com" style="color:#7c3aed;">myadugalam@gmail.com</a></p>
+    </div>
+  </div>
+</body>
+</html>"""
+            send_mail(subject, f"Payment Confirmed! Ref: {booking.booking_ref}", settings.EMAIL_HOST_USER, [attendee_email], html_message=html_body, fail_silently=True)
+        except Exception:
+            pass
+
+    return Response({
+        "message": "Payment successful and seats booked!",
+        "booking_ref": booking.booking_ref,
+        "booking_id": booking.id,
+        "booked_seats": event.booked_seats,
+    })
+
+
+
+# ==================== ADMIN EVENT BOOKINGS ====================
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def admin_event_bookings(request):
+    from .models import EventBookingRecord
+    event_id = request.query_params.get('event_id')
+    if event_id:
+        qs = EventBookingRecord.objects.filter(event_id=event_id).select_related('event')
+    else:
+        qs = EventBookingRecord.objects.all().select_related('event')
+    data = [
+        {
+            'id': b.id,
+            'booking_ref': b.booking_ref,
+            'event_title': b.event.title,
+            'event_id': b.event.id,
+            'attendee_name': b.attendee_name,
+            'attendee_email': b.attendee_email,
+            'attendee_whatsapp': b.attendee_whatsapp,
+            'ticket_type': b.ticket_type,
+            'qty': b.qty,
+            'unit_price': str(b.unit_price),
+            'total_amount': str(b.total_amount),
+            'is_free': b.is_free,
+            'status': b.status,
+            'created_at': b.created_at.strftime('%d %b %Y, %I:%M %p'),
+        }
+        for b in qs
+    ]
+    return Response(data)
+
+
+# ==================== MY EVENT BOOKINGS ====================
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def my_event_bookings(request):
+    from .models import EventBookingRecord
+    from django.db.models import Q
+    
+    # Match if attendee_email == user.email OR attendee_whatsapp == user.mobile
+    filters = Q(attendee_email__iexact=request.user.email)
+    if request.user.mobile:
+        filters |= Q(attendee_whatsapp=request.user.mobile)
+        
+    qs = EventBookingRecord.objects.filter(filters).select_related('event')
+    data = [
+        {
+            'id': b.id,
+            'booking_ref': b.booking_ref,
+            'event_title': b.event.title,
+            'event_id': b.event.id,
+            'event_location': b.event.location or b.event.address,
+            'event_date': b.event.start_date.strftime('%Y-%m-%d') if b.event.start_date else None,
+            'attendee_name': b.attendee_name,
+            'ticket_type': b.ticket_type,
+            'qty': b.qty,
+            'total_amount': str(b.total_amount),
+            'is_free': b.is_free,
+            'status': b.status,
+            'created_at': b.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+        }
+        for b in qs
+    ]
+    return Response(data)

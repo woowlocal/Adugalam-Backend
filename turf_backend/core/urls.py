@@ -18,7 +18,7 @@ class CustomTokenRefreshView(TokenRefreshView):
             return Response({"error": "User account no longer exists"}, status=status.HTTP_401_UNAUTHORIZED)
 
 # pyrefly: ignore [missing-import]
-from .views import admin_banner_detail, admin_manage_banners, delete_user, get_hit_stats, get_users, list_homepage_banners, record_hit, update_user, user_notifications, vendor_my_turfs, vendor_profile, vendor_requests, user_retire_request, admin_retire_requests, admin_retire_action, restore_account, list_events, admin_events, admin_event_detail, book_event
+from .views import admin_banner_detail, admin_manage_banners, delete_user, get_hit_stats, get_users, list_homepage_banners, record_hit, update_user, user_notifications, vendor_my_turfs, vendor_profile, vendor_requests, user_retire_request, admin_retire_requests, admin_retire_action, restore_account, list_events, admin_events, admin_event_detail, book_event, event_create_payment_order, event_verify_payment, admin_event_bookings, my_event_bookings
 
 from core.views import (
     booking_detail,
@@ -72,6 +72,7 @@ from core.views import (
     vendor_add_turf,
     vendor_booking_list,
     vendor_update_booking_status,
+    vendor_manual_booking,
     vendor_list_discounts,
     vendor_create_discount,
     vendor_list,
@@ -187,8 +188,16 @@ urlpatterns = [
     path("vendor/turfs/create/", vendor_add_turf),
 
     path("vendor/bookings/", vendor_booking_list),
-    path("vendor/bookings/update/", vendor_update_booking_status),
-
+    path(
+        "vendor/bookings/update/",
+        vendor_update_booking_status,
+        name="vendor-update-booking-status",
+    ),
+    path(
+        "vendor/bookings/manual/",
+        vendor_manual_booking,
+        name="vendor-manual-booking",
+    ),
     path("vendor/slots/", vendor_list_slots),
     path("vendor/slots/create/", vendor_create_slots),
     path("vendor/set-peak-hour/", vendor_set_peak_hour),
@@ -234,6 +243,10 @@ urlpatterns = [
     path("admin/event-reviews/", views.admin_event_reviews),
     path("admin/event-reviews/<int:review_id>/", views.admin_event_reviews),
     path("events/<int:pk>/book/", book_event),
+    path("events/<int:pk>/create-order/", event_create_payment_order),
+    path("events/<int:pk>/verify-payment/", event_verify_payment),
+    path("events/my-bookings/", my_event_bookings),
+    path("admin/event-bookings/", admin_event_bookings),
 
     # ------------usermanagemnet in admin panel----------------
     path("users/", get_users),
