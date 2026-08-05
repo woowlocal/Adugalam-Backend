@@ -711,27 +711,35 @@ def verify_payment(request):
     except Exception as e:
         return Response({"error": "Payment verification failed: Invalid signature"}, status=400)
 
-    with transaction.atomic():
-        booking = (
-            Booking.objects.select_for_update()
-            .select_related("turf")
-            .get(id=booking_id, user=request.user)
-        )
+    try:
+        with transaction.atomic():
+            booking = (
+                Booking.objects.select_for_update()
+                .select_related("turf")
+                .get(id=booking_id, user=request.user)
+            )
 
-        payment = Payment.objects.get(booking=booking)
+            payment = Payment.objects.get(booking=booking)
 
-        payment.razorpay_payment_id = payment_id
-        payment.razorpay_signature = signature
-        payment.amount = int(booking.total_payable * 100)
-        payment.status = "SUCCESS"
-        payment.save()
+            payment.razorpay_payment_id = payment_id
+            payment.razorpay_signature = signature
+            payment.amount = int(booking.total_payable * 100)
+            payment.status = "SUCCESS"
+            payment.save()
 
-        # 🔥 NOW lock the slots (only on SUCCESS payment)
-        # booking.slots.update(is_available=False)
+            # 🔥 NOW lock the slots (only on SUCCESS payment)
+            # booking.slots.update(is_available=False)
 
-        booking.status = "CONFIRMED"
-        booking.vendor_status = "ACTIVE"
-        booking.save()
+            booking.status = "CONFIRMED"
+            booking.vendor_status = "ACTIVE"
+            booking.save()
+    except Booking.DoesNotExist:
+        return Response({"error": "Booking not found"}, status=404)
+    except Payment.DoesNotExist:
+        return Response({"error": "No payment order found for this booking"}, status=404)
+    except Exception as e:
+        print("Verify Payment Error:", str(e))
+        return Response({"error": "Something went wrong while confirming the booking"}, status=500)
 
     # Trigger emails asynchronously
     threading.Thread(target=send_booking_emails, args=(booking,)).start()
