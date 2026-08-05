@@ -604,13 +604,13 @@ def booking_detail(request, booking_id):
 def create_payment_order(request):
     try:
         booking_id = request.data.get("booking_id")
-        amount = request.data.get("amount")
+        
 
-        if not booking_id or not amount:
-            return Response({"error": "Booking ID and amount required"}, status=400)
+        if not booking_id:
+            return Response({"error": "Booking ID required"}, status=400)
 
         booking = Booking.objects.get(id=booking_id, user=request.user)
-
+        amount =int(booking.total_payable*100)
         #  Prevent duplicate successful payment
         if hasattr(booking, "payment") and booking.payment.status == "SUCCESS":
             return Response({"error": "Payment already completed"}, status=400)
@@ -4629,6 +4629,26 @@ def event_verify_payment(request, pk):
 
     if event.total_seats > 0 and (event.booked_seats + qty) > event.total_seats:
         return Response({"error": "Slot Full! Not enough seats available."}, status=400)
+
+    if float(event.amount) > 0:
+        payment_id = request.data.get("razorpay_payment_id") or request.data.get("payment_id")
+        order_id = request.data.get("razorpay_order_id") or request.data.get("order_id")
+        signature = request.data.get("razorpay_signature") or request.data.get("signature")
+
+        if not all([payment_id, order_id, signature]):
+            return Response({"error": "Missing payment details"}, status=400)
+
+        try:
+            client = razorpay.Client(
+                auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+            )
+            client.utility.verify_payment_signature({
+                'razorpay_order_id': order_id,
+                'razorpay_payment_id': payment_id,
+                'razorpay_signature': signature
+            })
+        except Exception:
+            return Response({"error": "Payment verification failed: Invalid signature"}, status=400)
 
     event.booked_seats += qty
     event.save()
