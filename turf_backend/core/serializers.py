@@ -331,3 +331,17 @@ class EventReviewSerializer(serializers.ModelSerializer):
     class Meta:
         model = EventReview
         fields = ['id', 'event', 'event_title', 'user', 'user_id', 'name', 'rating', 'text', 'created_at']
+
+# ---------- NOTIFICATIONS ----------
+from .models import Notification, SlotAlert
+
+class NotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        fields = '__all__'
+
+class SlotAlertSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SlotAlert
+        fields = '__all__'
+

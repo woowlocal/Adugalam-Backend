@@ -8,6 +8,8 @@ from . import views
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework.response import Response
 from rest_framework import status
+
+# pyrefly: ignore [missing-import]
 from core.models import AppUser
 
 class CustomTokenRefreshView(TokenRefreshView):
@@ -19,7 +21,6 @@ class CustomTokenRefreshView(TokenRefreshView):
 
 # pyrefly: ignore [missing-import]
 from .views import admin_banner_detail, admin_manage_banners, delete_user, get_hit_stats, get_users, list_homepage_banners, record_hit, update_user, user_notifications, vendor_my_turfs, vendor_profile, vendor_requests, user_retire_request, admin_retire_requests, admin_retire_action, restore_account, list_events, admin_events, admin_event_detail, book_event, event_create_payment_order, event_verify_payment, admin_event_bookings, my_event_bookings
-
 from core.views import (
     booking_detail,
     booking_summary,

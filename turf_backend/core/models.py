@@ -709,3 +709,61 @@ class EventReview(models.Model):
 
     def __str__(self):
         return f"{self.name} - {self.event.title} ({self.rating} Stars)"
+
+
+# -------------------- NOTIFICATIONS --------------------
+
+class DeviceToken(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='device_tokens')
+    token = models.CharField(max_length=255, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used = models.DateTimeField(auto_now=True)
+    
+    def __str__(self):
+        return f"{self.user.email} - {self.token[:20]}..."
+
+class Notification(models.Model):
+    NOTIFICATION_TYPES = (
+        ("SLOT_AVAILABLE", "Slot Available"),
+        ("BOOKING_CONFIRMED", "Booking Confirmed"),
+        ("BOOKING_CANCELLED", "Booking Cancelled"),
+        ("BOOKING_RESCHEDULED", "Booking Rescheduled"),
+        ("BOOKING_REMINDER", "Booking Reminder"),
+        ("TOURNAMENT", "Tournament"),
+        ("EVENT", "Event"),
+        ("PROMOTION", "Promotion"),
+        ("SYSTEM", "System"),
+    )
+    
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='app_notifications')
+    type = models.CharField(max_length=50, choices=NOTIFICATION_TYPES, default="SYSTEM")
+    title = models.CharField(max_length=255)
+    message = models.TextField()
+    image = models.URLField(blank=True, null=True)
+    related_id = models.CharField(max_length=100, blank=True, null=True)
+    related_type = models.CharField(max_length=50, blank=True, null=True)
+    action_url = models.CharField(max_length=500, blank=True, null=True)
+    
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(blank=True, null=True)
+    
+    class Meta:
+        ordering = ["-created_at"]
+        
+    def __str__(self):
+        return f"{self.user.email} - {self.title}"
+
+class SlotAlert(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='slot_alerts')
+    turf = models.ForeignKey(Turf, on_delete=models.CASCADE)
+    date = models.DateField()
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    
+    is_fulfilled = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"Alert: {self.turf.name} for {self.user.email} on {self.date}"
+
