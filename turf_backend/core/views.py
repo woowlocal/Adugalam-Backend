@@ -42,7 +42,7 @@ from .utils.email_service import (
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
-
+# pyrefly: ignore [missing-import]
 from core.serializers import (
     SlotSerializer,
     TurfSerializer,
@@ -51,6 +51,7 @@ from core.serializers import (
     AdminTurfCreateSerializer,
     UserIssueSerializer,
 )
+# pyrefly: ignore [missing-import]
 from core.models import (
     AppUser,
     UserManager,
@@ -899,6 +900,7 @@ def my_bookings(request):
 from django.contrib.auth.hashers import make_password
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
+# pyrefly: ignore [missing-import]
 from core.models import AppUser, EmailOTP
 
 
@@ -1113,6 +1115,7 @@ def admin_resolve_issue(request, issue_id):
 @permission_classes([AllowAny])
 def admin_dashboard_main(request):
     try:
+        # pyrefly: ignore [missing-import]
         from core.models import Turf, Booking, Payment, Vendor
         from django.contrib.auth import get_user_model
         from django.db.models.functions import TruncDate
@@ -3198,6 +3201,7 @@ def record_hit(request):
 # ----------------------user management in admin panel----------------------
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
+# pyrefly: ignore [missing-import]
 from core.models import AppUser
 
 
@@ -3738,6 +3742,7 @@ def vendor_profile(request):
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+# pyrefly: ignore [missing-import]
 from core.models import Turf
 
 
@@ -3873,6 +3878,7 @@ def vendor_turf_detail(request, turf_id):
 
 # ---- vendor edit turf ----
 from rest_framework.parsers import MultiPartParser, FormParser
+# pyrefly: ignore [missing-import]
 from core.models import TurfBanner, TurfGallery
 import json as _json
 
@@ -4199,18 +4205,24 @@ def list_events(request):
         start = event.start_date
         end = event.end_date
 
-        if event.status == "featured":
-            computed_status = "featured"
-        elif not start:
-            computed_status = "upcoming"
-        elif start > today:
-            computed_status = "upcoming"
+        if end and end < today:
+            computed_status = "completed"
+        elif start and start < today and not end:
+            computed_status = "completed"
         elif end and end >= today >= start:
             computed_status = "ongoing"
-        elif end and end < today:
-            computed_status = "completed"
+        elif start and start == today and not end:
+            computed_status = "ongoing"
+        elif start and start > today:
+            computed_status = "upcoming"
         else:
             computed_status = "upcoming"
+
+        if computed_status == "completed":
+            continue
+
+        if event.status == "featured":
+            computed_status = "featured"
 
         if status_filter and computed_status != status_filter:
             continue
