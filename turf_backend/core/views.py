@@ -24,8 +24,10 @@ from django.views.decorators.csrf import csrf_exempt
 
 import razorpay
 from django.conf import settings
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
+# pyrefly: ignore [missing-import]
+from core.utils.throttling import LoginThrottle, SignupThrottle
 from rest_framework.response import Response
 from rest_framework.generics import ListAPIView
 # pyrefly: ignore [missing-import]
@@ -134,6 +136,7 @@ def verify_email_otp_view(request):
 
 #  CREATE ACCOUNT
 @api_view(["POST"])
+@throttle_classes([SignupThrottle])
 def create_account_view(request):
     name = request.data.get("name")
     email = request.data.get("email")
@@ -173,6 +176,7 @@ from rest_framework.response import Response
 
 
 @api_view(["POST"])
+@throttle_classes([LoginThrottle])
 def login_view(request):
     email = request.data.get("email")
     password = request.data.get("password")
@@ -374,9 +378,9 @@ def turf_details(request, turf_id):
         # Prefetch all related rows in one DB round-trip (no extra queries)
         turf = Turf.objects.prefetch_related(
             "banners", "gallery", "slot_items", "game_items"
-        ).get(id=turf_id, retire=0)
+        ).get(id=turf_id, retire=0, is_maintenance=False)
     except Turf.DoesNotExist:
-        return Response({"error": "Turf not found"}, status=404)
+        return Response({"error": "Turf not found or under maintenance"}, status=404)
 
     # Build slot list — price uses turf.price_per_hour (single source of truth)
     slots = [
@@ -979,6 +983,7 @@ from django.contrib.auth import get_user_model
 
 
 @api_view(["POST"])
+@throttle_classes([LoginThrottle])
 def admin_login(request):
     password = request.data.get("password")
     email = request.data.get("email")
@@ -4043,9 +4048,14 @@ def admin_set_bulk_peak_hours(request):
                 except:
                     continue
 
-            slots = Slot.objects.filter(
-                turf=turf, start_time__gte=start_t, end_time__lte=end_t
-            )
+            from django.db.models import Q
+            midnight = datetime.strptime("00:00", "%H:%M").time()
+            if end_t == midnight:
+                slots = Slot.objects.filter(turf=turf, start_time__gte=start_t)
+            elif start_t > end_t:
+                slots = Slot.objects.filter(Q(start_time__gte=start_t) | Q(end_time__lte=end_t), turf=turf)
+            else:
+                slots = Slot.objects.filter(turf=turf, start_time__gte=start_t, end_time__lte=end_t)
 
             for slot in slots:
                 PeakHour.objects.update_or_create(
@@ -4099,9 +4109,14 @@ def vendor_set_bulk_peak_hours(request):
                 except:
                     continue
 
-            slots = Slot.objects.filter(
-                turf=turf, start_time__gte=start_t, end_time__lte=end_t
-            )
+            from django.db.models import Q
+            midnight = datetime.strptime("00:00", "%H:%M").time()
+            if end_t == midnight:
+                slots = Slot.objects.filter(turf=turf, start_time__gte=start_t)
+            elif start_t > end_t:
+                slots = Slot.objects.filter(Q(start_time__gte=start_t) | Q(end_time__lte=end_t), turf=turf)
+            else:
+                slots = Slot.objects.filter(turf=turf, start_time__gte=start_t, end_time__lte=end_t)
 
             for slot in slots:
                 PeakHour.objects.update_or_create(

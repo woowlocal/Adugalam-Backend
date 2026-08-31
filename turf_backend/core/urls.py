@@ -11,8 +11,14 @@ from rest_framework import status
 
 # pyrefly: ignore [missing-import]
 from core.models import AppUser
+# pyrefly: ignore [missing-import]
+from core.utils.throttling import LoginThrottle
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    throttle_classes = [LoginThrottle]
 
 class CustomTokenRefreshView(TokenRefreshView):
+    throttle_classes = [LoginThrottle]
     def post(self, request, *args, **kwargs):
         try:
             return super().post(request, *args, **kwargs)
@@ -117,7 +123,7 @@ urlpatterns = [
     path("reset-password/", reset_password),
     path("user/change-password/", change_password),
     path("user/profile/", update_user_profile),
-    path("token/", TokenObtainPairView.as_view()),
+    path("token/", CustomTokenObtainPairView.as_view()),
     path("token/refresh/", CustomTokenRefreshView.as_view(), name="token_refresh"),
 
     path("turfs/<int:turf_id>/games", turf_games),
