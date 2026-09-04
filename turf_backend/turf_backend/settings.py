@@ -114,20 +114,28 @@ TEMPLATES = [
 
 
 # --------------------------------------------------
-# DATABASE (MySQL)
+# DATABASE (Neon PostgreSQL / Local)
 # --------------------------------------------------
 import dj_database_url
 
-DATABASES = {
-    "default": dj_database_url.config(
-        default=config(
-            "DATABASE_URL",
-            default=f"postgresql://{config('DB_USER', default='postgres')}:{config('DB_PASSWORD', default='postgres')}@{config('DB_HOST', default='127.0.0.1')}:{config('DB_PORT', default='3000')}/{config('DB_NAME', default='turf_db')}"
-        ),
-        conn_max_age=600,
-        ssl_require=True if config("DATABASE_URL", default="") else False
-    )
-}
+DATABASE_URL = config("DATABASE_URL", default="")
+
+if DATABASE_URL:
+    DATABASES = {
+        "default": dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=600,
+            ssl_require=True
+        )
+    }
+else:
+    DATABASES = {
+        "default": dj_database_url.config(
+            default=f"postgresql://{config('DB_USER', default='postgres')}:{config('DB_PASSWORD', default='postgres')}@{config('DB_HOST', default='127.0.0.1')}:{config('DB_PORT', default='3000')}/{config('DB_NAME', default='turf_db')}",
+            conn_max_age=600,
+        )
+    }
+
 
 
 # --------------------------------------------------
