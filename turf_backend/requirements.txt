@@ -12,3 +12,5 @@ Pillow
 supabase
 gunicorn
 whitenoise
+cloudinary
+django-cloudinary-storage

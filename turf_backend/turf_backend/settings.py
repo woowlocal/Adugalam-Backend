@@ -40,12 +40,14 @@ ALLOWED_HOSTS = [
 # APPLICATIONS
 # --------------------------------------------------
 INSTALLED_APPS = [
+    'cloudinary_storage',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'cloudinary',
 
     # Third party
     'rest_framework',
@@ -158,9 +160,16 @@ USE_TZ = True
 # --------------------------------------------------
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+default_storage_backend = (
+    "cloudinary_storage.storage.MediaCloudinaryStorage"
+    if config("CLOUDINARY_CLOUD_NAME", default="")
+    else "django.core.files.storage.FileSystemStorage"
+)
+
 STORAGES = {
     "default": {
-        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "BACKEND": default_storage_backend,
     },
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
@@ -237,3 +246,17 @@ WHATSAPP_CLIENT_ID = os.getenv("WHATSAPP_CLIENT_ID")
 WHATSAPP_CLIENT_PASSWORD = os.getenv("WHATSAPP_CLIENT_PASSWORD")
 WHATSAPP_FROM_NUMBER = os.getenv("WHATSAPP_FROM_NUMBER")
 WHATSAPP_USER_ID = int(os.getenv("WHATSAPP_USER_ID", 3))
+
+# --------------------------------------------------
+# CLOUDINARY MEDIA STORAGE CONFIG
+# --------------------------------------------------
+CLOUDINARY_CLOUD_NAME = config("CLOUDINARY_CLOUD_NAME", default="")
+CLOUDINARY_API_KEY = config("CLOUDINARY_API_KEY", default="")
+CLOUDINARY_API_SECRET = config("CLOUDINARY_API_SECRET", default="")
+
+if CLOUDINARY_CLOUD_NAME:
+    CLOUDINARY_STORAGE = {
+        'CLOUD_NAME': CLOUDINARY_CLOUD_NAME,
+        'API_KEY': CLOUDINARY_API_KEY,
+        'API_SECRET': CLOUDINARY_API_SECRET,
+    }
