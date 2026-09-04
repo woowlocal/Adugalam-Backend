@@ -1,13 +1,10 @@
 services:
   - type: web
     name: adugalam-backend
-    env: python
-    rootDir: turf_backend
-    buildCommand: "./build.sh"
-    startCommand: "gunicorn turf_backend.wsgi:application"
+    env: docker
+    dockerContext: turf_backend
+    dockerfilePath: turf_backend/Dockerfile
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.12.0
       - key: DEBUG
         value: "False"
       - key: DATABASE_URL
