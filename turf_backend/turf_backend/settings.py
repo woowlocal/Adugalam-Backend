@@ -63,6 +63,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',   # ✅ MUST be first (top)
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -113,18 +114,17 @@ TEMPLATES = [
 # --------------------------------------------------
 # DATABASE (MySQL)
 # --------------------------------------------------
+import dj_database_url
+
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.mysql",
-        "NAME": config("DB_NAME", default="turf_db"),
-        "USER": config("DB_USER", default="root"),
-        "PASSWORD": config("DB_PASSWORD", default="root"),
-        "HOST": config("DB_HOST", default="127.0.0.1"),
-        "PORT": config("DB_PORT", default="3306"),
-        "OPTIONS": {
-            "init_command": "SET sql_mode='STRICT_TRANS_TABLES'"
-        },
-    }
+    "default": dj_database_url.config(
+        default=config(
+            "DATABASE_URL",
+            default=f"postgresql://{config('DB_USER', default='postgres')}:{config('DB_PASSWORD', default='postgres')}@{config('DB_HOST', default='127.0.0.1')}:{config('DB_PORT', default='3000')}/{config('DB_NAME', default='turf_db')}"
+        ),
+        conn_max_age=600,
+        ssl_require=True if config("DATABASE_URL", default="") else False
+    )
 }
 
 
@@ -157,6 +157,15 @@ USE_TZ = True
 # STATIC FILES
 # --------------------------------------------------
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / "staticfiles"
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
@@ -199,17 +208,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend" if DEBUG else "django.core.mail.backends.smtp.EmailBackend")
 
-EMAIL_HOST = os.getenv("SMTP_HOST")
-EMAIL_PORT = int(os.getenv("SMTP_PORT"))
-EMAIL_HOST_USER = os.getenv("SMTP_USER")
-EMAIL_HOST_PASSWORD = os.getenv("SMTP_PASS")
+EMAIL_HOST = os.getenv("SMTP_HOST", "localhost")
+EMAIL_PORT = int(os.getenv("SMTP_PORT", 587))
+EMAIL_HOST_USER = os.getenv("SMTP_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("SMTP_PASS", "")
 
 EMAIL_USE_TLS = True
 EMAIL_USE_SSL = False
 
-DEFAULT_FROM_EMAIL = f"TurfApp <{EMAIL_HOST_USER}>"
+DEFAULT_FROM_EMAIL = f"TurfApp <{EMAIL_HOST_USER}>" if EMAIL_HOST_USER else "TurfApp <noreply@adugalam.com>"
 
 
 # --------------------------------------------------

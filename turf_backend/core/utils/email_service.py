@@ -30,7 +30,11 @@ If you did not request this, please ignore this email.
             fail_silently=False
         )
     except Exception as e:
-        raise ValidationError(f"Email service failed: {str(e)}")
+        if getattr(settings, "DEBUG", False):
+            print(f"[DEBUG EMAIL] Failed to send email to {email}: {e}")
+            print(f"[DEBUG EMAIL] OTP Code for {email} is: {otp}")
+        else:
+            raise ValidationError(f"Email service failed: {str(e)}")
 
 
 def send_vendor_approval_email(email, vendor, password):
