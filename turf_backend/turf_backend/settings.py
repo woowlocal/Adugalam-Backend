@@ -156,10 +156,13 @@ USE_TZ = True
 
 
 # --------------------------------------------------
-# STATIC FILES
+# STATIC & MEDIA FILES
 # --------------------------------------------------
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+STATICFILES_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"
+
 
 default_storage_backend = (
     "cloudinary_storage.storage.MediaCloudinaryStorage"
@@ -167,14 +170,9 @@ default_storage_backend = (
     else "django.core.files.storage.FileSystemStorage"
 )
 
-STORAGES = {
-    "default": {
-        "BACKEND": default_storage_backend,
-    },
-    "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
-    },
-}
+DEFAULT_FILE_STORAGE = default_storage_backend
+
+
 
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
