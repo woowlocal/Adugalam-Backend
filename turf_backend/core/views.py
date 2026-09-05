@@ -617,7 +617,11 @@ def create_payment_order(request):
         booking = Booking.objects.get(id=booking_id, user=request.user)
         amount =int(booking.total_payable*100)
         #  Prevent duplicate successful payment
-        if hasattr(booking, "payment") and booking.payment.status == "SUCCESS":
+        # NOTE: hasattr() does NOT work safely on Django OneToOneField reverse relations
+        # because Django raises RelatedObjectDoesNotExist (not AttributeError) when no payment exists.
+        # Python 3's hasattr() only catches AttributeError, so it crashes with a 500 error.
+        # We use a safe DB query instead.
+        if Payment.objects.filter(booking=booking, status="SUCCESS").exists():
             return Response({"error": "Payment already completed"}, status=400)
 
         #  Razorpay client
