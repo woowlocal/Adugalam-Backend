@@ -1504,13 +1504,29 @@ def payments_list(request):
 
 
 # --- Vendor endpoints (stub) ---
-# Your backend doesn't include a Vendor model yet.
-# These endpoints exist so your Admin React flow won't break.
+# vendors_list — returns all vendors for Django admin panel
 
 
-@staff_member_required
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def vendors_list(request):
-    return JsonResponse({"results": []})
+    vendors = Vendor.objects.all().order_by("-created_at")
+    data = [
+        {
+            "id": v.id,
+            "vendor_id": v.vendor_id,
+            "venuename": v.venuename,
+            "ownername": v.ownername,
+            "email": v.email,
+            "phone": v.phone,
+            "location": v.location,
+            "totalturf": v.totalturf,
+            "status": v.status,
+            "created_at": v.created_at,
+        }
+        for v in vendors
+    ]
+    return Response(data)
 
 
 @api_view(["PUT"])
@@ -1528,7 +1544,6 @@ def vendor_approve(request, id):
         vendor.save()
 
         # 3. Create Corresponding AppUser
-        # Check if user already exists to avoid unique constraint errors
         if not AppUser.objects.filter(email=vendor.email).exists():
             AppUser.objects.create_user(
                 email=vendor.email,
@@ -1540,18 +1555,31 @@ def vendor_approve(request, id):
                 last_login=timezone.now(),
             )
         else:
-            # If user exists, ensure they have the vendor role and update password if needed
             user = AppUser.objects.get(email=vendor.email)
-            # Re-set password only if we generated a new one or want to ensure it matches Vendor record
             user.set_password(random_password)
             user.role = "VENDOR"
             user.is_verified = True
             user.last_login = timezone.now()
             user.save()
 
-        # ✅ Send approval email to vendor with the password
+        # ✅ Send approval email
         if vendor.email:
             send_vendor_approval_email(vendor.email, vendor, random_password)
+
+        # ✅ Send WhatsApp approval message (background thread)
+        def _send_wa_approve():
+            try:
+                res = send_whatsapp_message(
+                    phone=vendor.phone,
+                    vendor_id=vendor.vendor_id,
+                    location=vendor.location,
+                    status="Approved"
+                )
+                print("✅ WhatsApp Approve Result:", res)
+            except Exception as e:
+                print("WhatsApp Approve Error:", str(e))
+
+        threading.Thread(target=_send_wa_approve, daemon=True).start()
 
         return Response({"message": "Vendor Approved and User Account Created"})
     except Vendor.DoesNotExist:
@@ -1566,6 +1594,25 @@ def vendor_reject(request, id):
         # ✅ Send rejection email BEFORE deleting the record
         if vendor.email:
             send_vendor_rejection_email(vendor.email, vendor)
+
+        # ✅ Send WhatsApp rejection message (background thread, before delete)
+        _phone = vendor.phone
+        _vendor_id = vendor.vendor_id
+        _location = vendor.location
+
+        def _send_wa_reject():
+            try:
+                res = send_whatsapp_message(
+                    phone=_phone,
+                    vendor_id=_vendor_id,
+                    location=_location,
+                    status="Rejected"
+                )
+                print("❌ WhatsApp Reject Result:", res)
+            except Exception as e:
+                print("WhatsApp Reject Error:", str(e))
+
+        threading.Thread(target=_send_wa_reject, daemon=True).start()
 
         vendor.delete()
         return Response({"message": "Vendor Rejected and Removed"})
@@ -2172,12 +2219,30 @@ def vendor_create(request):
     if request.method == "POST":
         try:
             data = json.loads(request.body)
+            email = data.get("email", "").strip().lower()
 
-            # ✅ Create Vendor
+            # ✅ Duplicate check — block only if already Pending or Approved
+            existing = Vendor.objects.filter(email__iexact=email).first()
+            if existing:
+                if existing.status == "Pending":
+                    return JsonResponse(
+                        {"error": "duplicate", "message": "Your application is already under review. Please wait for admin approval."},
+                        status=400
+                    )
+                elif existing.status == "Approved":
+                    return JsonResponse(
+                        {"error": "duplicate", "message": "This email is already registered as an approved vendor. Please login to your vendor account."},
+                        status=400
+                    )
+                # If Rejected status exists (edge case - not deleted yet), allow re-submit by removing old record
+                elif existing.status == "Rejected":
+                    existing.delete()
+
+            # ✅ Create Vendor (fresh or re-application after rejection)
             vendor = Vendor.objects.create(
                 venuename=data["venuename"],
                 ownername=data["ownername"],
-                email=data["email"],
+                email=email,
                 phone=data["phone"],
                 location=data["location"],
                 address=data["address"],
@@ -2232,6 +2297,7 @@ def vendor_create(request):
 
         except Exception as e:
             return JsonResponse({"error": str(e)}, status=500)
+
 
 
 # ------------add turf page laa vendor id kuduta name varnu------------------------------
@@ -2315,13 +2381,23 @@ def vendor_requests(request):
 
 
 @api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
 def delete_vendor(request, id):
     try:
-        vendor = Vendor.objects.get(vendor_id=id)
+        vendor = Vendor.objects.get(pk=id)  # pk = integer primary key
+        
+        # 1. Set turfs to retire=1 and detach vendor
+        Turf.objects.filter(vendor=vendor).update(retire=1, vendor=None)
+        
+        # 2. Delete the associated AppUser account
+        AppUser.objects.filter(email=vendor.email).delete()
+        
+        # 3. Delete the vendor record
         vendor.delete()
-        return Response({"message": "Deleted"})
+        
+        return Response({"message": "Vendor and associated AppUser deleted, Turfs retired successfully"}, status=200)
     except Vendor.DoesNotExist:
-        return Response({"error": "Not found"}, status=404)
+        return Response({"error": "Vendor not found"}, status=404)
 
 @api_view(["PUT"])
 def vendor_status_toggle(request, vendor_id):
