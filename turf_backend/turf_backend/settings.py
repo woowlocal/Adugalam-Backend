@@ -129,11 +129,22 @@ if DATABASE_URL:
         )
     }
 else:
+    # "default": dj_database_url.config(
+    #         default=f"postgresql://{config('DB_USER', default='postgres')}:{config('DB_PASSWORD', default='postgres')}@{config('DB_HOST', default='127.0.0.1')}:{config('DB_PORT', default='3000')}/{config('DB_NAME', default='turf_db')}",
+    #         conn_max_age=600,
+    # Local development → MySQL
     DATABASES = {
-        "default": dj_database_url.config(
-            default=f"postgresql://{config('DB_USER', default='postgres')}:{config('DB_PASSWORD', default='postgres')}@{config('DB_HOST', default='127.0.0.1')}:{config('DB_PORT', default='3000')}/{config('DB_NAME', default='turf_db')}",
-            conn_max_age=600,
-        )
+        "default": {
+            "ENGINE": "django.db.backends.mysql",
+            "NAME": config("DB_NAME", default="turf_db"),
+            "USER": config("DB_USER", default="root"),
+            "PASSWORD": config("DB_PASSWORD", default="root"),
+            "HOST": config("DB_HOST", default="127.0.0.1"),
+            "PORT": config("DB_PORT", default="3306"),
+            "OPTIONS": {
+                "charset": "utf8mb4",
+            },
+        }
     }
 
 
